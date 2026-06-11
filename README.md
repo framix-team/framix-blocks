@@ -126,6 +126,77 @@ block is live — editor preview, Inspector, and front-end render, no build
 tooling involved. A complete reference block (`framix/sample-card`) demonstrating
 the media and repeater controls ships with the `framix-site-blocks` scaffold.
 
+## Default images for media controls
+
+A `"control": "media"` attribute stores an attachment ID and gets a
+`MediaUpload` picker in the Inspector. Often you want it to start with an
+image already chosen — a placeholder hero, a default avatar — without asking
+every editor to pick one. Declare a `media` object on the attribute and ship
+the file in the block's `assets/` directory:
+
+```json
+{
+  "attributes": {
+    "image": {
+      "type": "integer",
+      "default": 0,
+      "control": "media",
+      "media": {
+        "default_asset": "assets/hero-default.webp",
+        "alt": "Abstract gradient backdrop"
+      }
+    }
+  }
+}
+```
+
+`default_asset` is a path relative to the block directory, and the schema
+`default` stays `0` — the engine fills in the real value. At registration the
+engine sideloads the file into the site's media library the first time it
+sees it, then rewrites the attribute's `default` to the new attachment ID. The
+editor opens with the image pre-selected in the `MediaUpload` control, and your
+`render.php` resolves the ID through `wp_get_attachment_image()` exactly as it
+would for an editor-chosen image — there is no separate code path for the
+default.
+
+Resolution is **per environment** and **idempotent**. The engine keys each
+asset by content hash (sha256), so the sideload happens once: every later
+registration reuses the same attachment, on that environment. Staging and
+production each resolve to their own attachment ID — IDs are never carried
+across environments, which is why the default is expressed as a file in the
+repository rather than a baked-in number. Replace the file with new content and
+the next registration sideloads the new version (the old attachment is left
+untouched — the engine never deletes attachments).
+
+If anything goes wrong — the file is missing, unreadable, or the sideload
+fails — the attribute simply keeps its `0` default and the block renders
+without a default image. A bad asset is logged (under `WP_DEBUG`) and skipped;
+it never fatals and never blocks the rest of the page. Operators can find the
+hash-to-ID map in the `framix_blocks_media_defaults` option.
+
+**Rasters only — not SVG.** `default_asset` accepts `webp`, `png`, `jpg`,
+`jpeg`, `gif`, and `avif`. WordPress refuses SVG uploads, so SVGs can't be
+sideloaded; for decorative or inline art, ship the SVG in `assets/` and
+reference it directly with `framix_block_asset_url()` instead of routing it
+through a media control.
+
+### Asset-tree rules
+
+Any file you ship under a block's `assets/` directory is vetted at
+registration. The rules, so a malformed tree never trips the validator:
+
+- **Allowed extensions only:** `webp`, `png`, `jpg`, `jpeg`, `gif`, `svg`,
+  `avif`, `woff`, `woff2`, `ttf`, `otf`, `json`. Anything else — `.php`,
+  `.js`, `.html`, dotfiles — is rejected.
+- **No extensionless files.** `LICENSE`, `Makefile`, and friends have no
+  allowlisted extension and are refused; keep them out of `assets/`.
+- **No symlinks.** A symlink can point a friendly-looking name at something
+  dangerous outside the tree, so they're rejected outright.
+- **20 MB cap** on the total size of the directory.
+
+A block whose `assets/` tree breaks a rule is skipped and logged, like any
+other validation failure — it can't take the editor down with it.
+
 ## Updates
 
 Framix Blocks updates natively through the WordPress updater, using

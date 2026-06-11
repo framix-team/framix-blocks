@@ -199,6 +199,47 @@ assert_true(
 	'small assets/ tree under cap passes'
 );
 
+// Extensionless file (LICENSE) rejected with the explicit missing-extension message.
+assert_error_contains(
+	$V::validate( frx_make_block( $base, array( 'LICENSE' => 'MIT' ) ) ),
+	'missing extension',
+	'extensionless asset file is rejected (missing extension)'
+);
+
+// Symlink inside assets/ rejected — even when named like an allowlisted raster.
+$block_json_path = frx_make_block( $base, array( 'ok.webp' => 'x' ) );
+$assets_dir      = dirname( $block_json_path ) . '/assets';
+$target          = dirname( $block_json_path ) . '/outside.php';
+file_put_contents( $target, '<?php evil();' );
+if ( @symlink( $target, $assets_dir . '/pretty.webp' ) ) {
+	assert_error_contains(
+		$V::validate( $block_json_path ),
+		'symlink "pretty.webp"',
+		'symlink inside assets/ is rejected'
+	);
+} else {
+	echo "SKIP: symlink inside assets/ is rejected (symlink() unavailable on this filesystem)\n";
+}
+
+// Unreadable subdir inside assets/ — error string, never a fatal.
+// chmod 0000 does not block root reads (e.g. CI containers), so skip as root
+// when posix is available, and attempt-and-detect otherwise.
+$block_json_path = frx_make_block( $base, array( 'sub/inner.webp' => 'x' ) );
+$assets_dir      = dirname( $block_json_path ) . '/assets';
+$unreadable      = $assets_dir . '/sub';
+$is_root         = function_exists( 'posix_geteuid' ) && 0 === posix_geteuid();
+chmod( $unreadable, 0000 );
+if ( $is_root || is_readable( $unreadable ) ) {
+	echo "SKIP: unreadable assets/ subdir yields an error (perms do not block this user)\n";
+} else {
+	assert_error_contains(
+		$V::validate( $block_json_path ),
+		'unreadable directory "sub"',
+		'unreadable assets/ subdir yields an error (no fatal)'
+	);
+}
+chmod( $unreadable, 0755 );
+
 // ---------------------------------------------------------------------------
 // Exit.
 // ---------------------------------------------------------------------------

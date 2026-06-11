@@ -402,9 +402,16 @@ class Framix_Blocks_BlockJSON_Validator {
 	/**
 	 * Validate a block's assets/ directory (extension allowlist + size cap).
 	 *
-	 * Recursive but cheap — block asset dirs are small, so no caching. Any
-	 * file whose extension is outside the allowlist (notably .php/.js/.html/
-	 * .htaccess/dotfiles) is an error, as is a total tree over the size cap.
+	 * Recursive but cheap — block asset dirs are small, so no caching. Every
+	 * file must carry an allowlisted extension: anything else (notably
+	 * .php/.js/.html/.htaccess/dotfiles) is an error, and extensionless
+	 * files (LICENSE, Makefile) are deliberately rejected too. Symlinks are
+	 * rejected outright — a link named pretty.webp can target a .php outside
+	 * the tree, and block authors have no reason to ship them. Unreadable
+	 * subdirectories are reported as errors, and the scan itself can never
+	 * fatal: the iterator runs with CATCH_GET_CHILD and the whole walk is
+	 * wrapped in a Throwable guard that converts failures into validation
+	 * errors (this runs on `init` every request — it must only ever skip).
 	 *
 	 * @param string $assets_dir Absolute path to the block's assets/ dir.
 	 * @return array<int, string> Error messages (empty on success).
@@ -413,25 +420,55 @@ class Framix_Blocks_BlockJSON_Validator {
 		$errors = array();
 		$total  = 0;
 
-		$iterator = new RecursiveIteratorIterator(
-			new RecursiveDirectoryIterator( $assets_dir, FilesystemIterator::SKIP_DOTS ),
-			RecursiveIteratorIterator::LEAVES_ONLY
-		);
+		try {
+			$iterator = new RecursiveIteratorIterator(
+				new RecursiveDirectoryIterator( $assets_dir, FilesystemIterator::SKIP_DOTS ),
+				RecursiveIteratorIterator::SELF_FIRST,
+				RecursiveIteratorIterator::CATCH_GET_CHILD
+			);
 
-		foreach ( $iterator as $file ) {
-			if ( ! $file->isFile() ) {
-				continue;
+			foreach ( $iterator as $file ) {
+				// Symlinks bypass the extension allowlist — reject outright.
+				if ( $file->isLink() ) {
+					$errors[] = sprintf(
+						'block assets/ contains a symlink "%s" — symlinks are not allowed in asset trees.',
+						$file->getFilename()
+					);
+					continue;
+				}
+
+				if ( $file->isDir() ) {
+					if ( ! $file->isReadable() ) {
+						$errors[] = sprintf(
+							'block assets/ contains an unreadable directory "%s" — could not scan it.',
+							$file->getFilename()
+						);
+					}
+					continue;
+				}
+
+				if ( ! $file->isFile() ) {
+					continue;
+				}
+
+				$ext = strtolower( $file->getExtension() );
+				if ( '' === $ext ) {
+					$errors[] = sprintf(
+						'block assets/ contains a file "%s" with a missing extension — every asset must carry an allowlisted extension.',
+						$file->getFilename()
+					);
+				} elseif ( ! in_array( $ext, self::$allowed_asset_ext, true ) ) {
+					$errors[] = sprintf(
+						'block assets/ contains a disallowed file "%s" (extension not in the asset allowlist).',
+						$file->getFilename()
+					);
+				}
+
+				$total += (int) $file->getSize();
 			}
-
-			$ext = strtolower( $file->getExtension() );
-			if ( ! in_array( $ext, self::$allowed_asset_ext, true ) ) {
-				$errors[] = sprintf(
-					'block assets/ contains a disallowed file "%s" (extension not in the asset allowlist).',
-					$file->getFilename()
-				);
-			}
-
-			$total += (int) $file->getSize();
+		} catch ( \Throwable $e ) {
+			$errors[] = sprintf( 'block assets/ could not be scanned: %s.', $e->getMessage() );
+			return $errors;
 		}
 
 		if ( $total > self::ASSETS_MAX_BYTES ) {

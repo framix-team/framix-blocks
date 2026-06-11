@@ -130,6 +130,9 @@ assert_true(
 		&& $memo_before['size'] === $memo_after['size'],
 	'dedupe hit → _files memo present and unchanged (no re-hash needed)'
 );
+// Hard regression gate: the engine's hash seam counts real hash_file() calls
+// (zeroed by reset_cache() in frx_wp_reset) — a fresh memo means zero hashes.
+assert_true( 0 === Framix_Blocks_Media_Defaults::hash_call_count(), 'dedupe hit → zero real hash calls (memo prevented re-hash)' );
 
 // ===========================================================================
 // Case 4 — attachment deleted (get_post → null) → re-sideload, new id stored.
@@ -190,6 +193,7 @@ foreach ( array_keys( $opt5b ) as $k ) {
 	}
 }
 assert_true( '' !== $new_key && $id5b === $opt5b[ $new_key ], 'content changed → new dedupe key maps to the new id' );
+assert_true( 1 === Framix_Blocks_Media_Defaults::hash_call_count(), 'content changed → exactly one real hash call (stale memo re-hashed)' );
 
 // ===========================================================================
 // Case 6 — missing asset file → no sideload, default untouched, no throw.
@@ -225,6 +229,26 @@ assert_true( is_array( $out7 ), 'sideload WP_Error → resolve() returns array (
 assert_true( 0 === $out7['image']['default'], 'sideload WP_Error → default not rewritten (stays 0)' );
 assert_true( false === get_transient( Framix_Blocks_Media_Defaults::LOCK ), 'sideload WP_Error → lock released' );
 assert_true( ! isset( $GLOBALS['frx_wp']['options'][ Framix_Blocks_Media_Defaults::OPTION ][ '_skip' ] ), 'sideload WP_Error → no spurious option key' );
+assert_true(
+	is_string( $GLOBALS['frx_wp']['last_tmp_name'] ) && ! is_file( $GLOBALS['frx_wp']['last_tmp_name'] ),
+	'sideload WP_Error → temp file cleaned up'
+);
+
+// ===========================================================================
+// Case 7b — media_handle_sideload THROWS (not WP_Error) → resolve() still
+//           returns without throwing, the lock is released (not wedged for its
+//           TTL), and the temp file is cleaned up.
+// ===========================================================================
+frx_wp_reset();
+$GLOBALS['frx_wp']['sideload_throw'] = true;
+$b7b   = frx_media_block( 'image-bytes-throw' );
+$out7b = $E::resolve( $b7b['dir'], $b7b['meta'] );
+assert_true( is_array( $out7b ), 'sideload THROWS → resolve() returns array (no throw escapes)' );
+assert_true( 0 === $out7b['image']['default'], 'sideload THROWS → default not rewritten (stays 0)' );
+assert_true( false === get_transient( Framix_Blocks_Media_Defaults::LOCK ), 'sideload THROWS → lock released (finally), not wedged for its TTL' );
+$tmp7b = $GLOBALS['frx_wp']['last_tmp_name'];
+assert_true( is_string( $tmp7b ) && '' !== $tmp7b, 'sideload THROWS → stub recorded the tmp_name it was handed' );
+assert_true( ! is_file( $tmp7b ), 'sideload THROWS → temp file cleaned up (finally), no leak' );
 
 // ===========================================================================
 // Case 8 — lock already held → no sideload this pass, default untouched, lock

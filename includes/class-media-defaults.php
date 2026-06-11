@@ -70,6 +70,16 @@ class Framix_Blocks_Media_Defaults {
 	private static $cache = null;
 
 	/**
+	 * How many times hash_asset() actually hashed a file this request.
+	 *
+	 * Purely observational — lets tests assert the `_files` memo prevented a
+	 * re-hash. Reset alongside the option cache by reset_cache().
+	 *
+	 * @var int
+	 */
+	private static $hash_calls = 0;
+
+	/**
 	 * Resolve an asset's media defaults into rewritten attribute defaults.
 	 *
 	 * Scans `$meta['attributes']` for any attribute carrying
@@ -189,15 +199,25 @@ class Framix_Blocks_Media_Defaults {
 		set_transient( self::LOCK, 1, self::LOCK_TTL );
 
 		$alt = isset( $attr_def['media']['alt'] ) && is_string( $attr_def['media']['alt'] ) ? $attr_def['media']['alt'] : '';
-		$id  = self::sideload( $asset_path, $default_asset, $alt );
 
-		delete_transient( self::LOCK );
+		try {
+			$id = self::sideload( $asset_path, $default_asset, $alt );
+		} finally {
+			// Exception-safe release: should sideload() THROW (the
+			// admin-includes require or media_handle_sideload itself), the
+			// outer catch in resolve() swallows it — but the lock must not
+			// stay wedged for its full TTL.
+			delete_transient( self::LOCK );
+		}
 
 		if ( null === $id ) {
 			return null;
 		}
 
 		// 8. Persist: dedupe key → id, refresh the file memo, write once.
+		// Dedupe keys + _files memos accrue one entry per (block, asset,
+		// content-version) — unbounded in theory, negligible in practice;
+		// pruning could piggyback on this write if it ever matters.
 		$option           = self::option();
 		$option[ $key ]   = (int) $id;
 		self::$cache      = $option;
@@ -234,7 +254,7 @@ class Framix_Blocks_Media_Defaults {
 			return (string) $files[ $asset_path ]['sha16'];
 		}
 
-		$full = @hash_file( 'sha256', $asset_path );
+		$full = self::hash_asset( $asset_path );
 		if ( false === $full || ! is_string( $full ) || '' === $full ) {
 			return '';
 		}
@@ -246,6 +266,30 @@ class Framix_Blocks_Media_Defaults {
 		self::remember_file( $asset_path, $sha16 );
 
 		return $sha16;
+	}
+
+	/**
+	 * Hash one asset file (sha256) — counted seam around hash_file().
+	 *
+	 * The only place the engine hashes file contents. Counting invocations
+	 * here lets tests assert that a fresh `_files` memo really does prevent
+	 * a re-hash (see hash_call_count()).
+	 *
+	 * @param string $asset_path Absolute path to the asset.
+	 * @return string|false Full hex digest, or false on failure.
+	 */
+	protected static function hash_asset( $asset_path ) {
+		++self::$hash_calls;
+		return @hash_file( 'sha256', $asset_path );
+	}
+
+	/**
+	 * Number of real file-hash calls this request (test seam, read-only).
+	 *
+	 * @return int
+	 */
+	public static function hash_call_count() {
+		return self::$hash_calls;
 	}
 
 	/**
@@ -289,37 +333,42 @@ class Framix_Blocks_Media_Defaults {
 			return null;
 		}
 
-		if ( ! @copy( $asset_path, $tmp ) ) {
+		try {
+			if ( ! @copy( $asset_path, $tmp ) ) {
+				self::log( sprintf( '[framix-blocks] media-defaults: copy to temp failed for "%s" — skipping.', $asset_path ) );
+				return null;
+			}
+
+			$file = array(
+				'name'     => $basename,
+				'tmp_name' => $tmp,
+			);
+
+			$id = media_handle_sideload( $file, 0 );
+
+			if ( is_wp_error( $id ) ) {
+				self::log( sprintf(
+					'[framix-blocks] media-defaults: media_handle_sideload failed for "%s": %s — skipping.',
+					$asset_path,
+					$id->get_error_message()
+				) );
+				return null;
+			}
+
+			$id = (int) $id;
+
+			if ( '' !== $alt ) {
+				update_post_meta( $id, '_wp_attachment_image_alt', sanitize_text_field( $alt ) );
+			}
+
+			return $id;
+		} finally {
+			// Temp-file cleanup on every exit path — error return, WP_Error,
+			// or a Throwable out of media_handle_sideload. Double-unlink-safe:
+			// on success WordPress has already moved/removed the temp file, so
+			// this @unlink is a harmless no-op.
 			@unlink( $tmp );
-			self::log( sprintf( '[framix-blocks] media-defaults: copy to temp failed for "%s" — skipping.', $asset_path ) );
-			return null;
 		}
-
-		$file = array(
-			'name'     => $basename,
-			'tmp_name' => $tmp,
-		);
-
-		$id = media_handle_sideload( $file, 0 );
-
-		if ( is_wp_error( $id ) ) {
-			// media_handle_sideload cleans up on success but not always on failure.
-			@unlink( $tmp );
-			self::log( sprintf(
-				'[framix-blocks] media-defaults: media_handle_sideload failed for "%s": %s — skipping.',
-				$asset_path,
-				$id->get_error_message()
-			) );
-			return null;
-		}
-
-		$id = (int) $id;
-
-		if ( '' !== $alt ) {
-			update_post_meta( $id, '_wp_attachment_image_alt', sanitize_text_field( $alt ) );
-		}
-
-		return $id;
 	}
 
 	/**
@@ -364,6 +413,7 @@ class Framix_Blocks_Media_Defaults {
 	 * @return void
 	 */
 	public static function reset_cache() {
-		self::$cache = null;
+		self::$cache      = null;
+		self::$hash_calls = 0;
 	}
 }

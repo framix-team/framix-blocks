@@ -111,6 +111,8 @@ function frx_wp_reset() {
 		'sideload_calls'    => 0,        // how many times media_handle_sideload() ran.
 		'next_id'           => 100,      // incrementing attachment id source.
 		'sideload_error'    => false,    // when true, sideload returns WP_Error.
+		'sideload_throw'    => false,    // when true, sideload THROWS (not WP_Error).
+		'last_tmp_name'     => null,     // tmp_name handed to the last sideload call.
 	);
 	// Engine caches the option per request; clear it so each test is a fresh request.
 	if ( class_exists( 'Framix_Blocks_Media_Defaults' ) ) {
@@ -205,14 +207,22 @@ if ( ! function_exists( 'get_post' ) ) {
 if ( ! function_exists( 'media_handle_sideload' ) ) {
 	/**
 	 * Controllable sideload: counts calls; returns an incrementing id and
-	 * records it as an existing attachment, or a forced WP_Error.
+	 * records it as an existing attachment, a forced WP_Error, or a forced
+	 * Throwable. Always records the tmp_name it was handed so tests can
+	 * assert temp-file cleanup on the failure paths.
 	 *
 	 * @param array $file    File descriptor (name + tmp_name).
 	 * @param int   $post_id Parent post id (ignored).
 	 * @return int|WP_Error
+	 * @throws RuntimeException When the sideload_throw flag is set.
 	 */
 	function media_handle_sideload( $file, $post_id = 0 ) {
 		++$GLOBALS['frx_wp']['sideload_calls'];
+		$GLOBALS['frx_wp']['last_tmp_name'] = isset( $file['tmp_name'] ) ? $file['tmp_name'] : null;
+
+		if ( $GLOBALS['frx_wp']['sideload_throw'] ) {
+			throw new RuntimeException( 'forced sideload throw' );
+		}
 
 		// WordPress moves the temp file on success; emulate cleanup so the
 		// engine's failure-path @unlink is the only one that fires on error.

@@ -56,3 +56,37 @@ if ( ! function_exists( 'framix_block_asset_url' ) ) {
 		return plugins_url( $relative, trailingslashit( $block_dir ) . 'render.php' );
 	}
 }
+
+if ( ! function_exists( 'framix_block_edit_attr' ) ) {
+	/**
+	 * Inline-edit marker for server-rendered templates.
+	 *
+	 * Prints data-framix-edit attributes that the editor-side inline-edit
+	 * shim turns into click-to-edit targets. Emitted ONLY during REST/SSR
+	 * editor previews — the front-end render stays byte-identical (markers
+	 * never reach page caches or optimizers).
+	 *
+	 * Usage in render.php (inside the element's opening tag):
+	 *   <h3 class="card-title"<?php echo framix_block_edit_attr( 'title' ); ?>>
+	 * Repeater row field (index into the RAW attribute array):
+	 *   <li<?php echo framix_block_edit_attr( 'items', $i, 'label' ); ?>>
+	 *
+	 * @param string      $attr  Attribute name from block.json.
+	 * @param int|null    $index Repeater row index (raw array index).
+	 * @param string|null $field Repeater field key.
+	 * @return string Escaped attribute string (leading space) or ''.
+	 */
+	function framix_block_edit_attr( $attr, $index = null, $field = null ) {
+		if ( ! ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) {
+			return '';
+		}
+		$out = ' data-framix-edit="' . esc_attr( $attr ) . '"';
+		if ( null !== $index ) {
+			$out .= ' data-framix-edit-i="' . esc_attr( (string) $index ) . '"';
+		}
+		if ( null !== $field ) {
+			$out .= ' data-framix-edit-f="' . esc_attr( $field ) . '"';
+		}
+		return $out;
+	}
+}

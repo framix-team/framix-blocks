@@ -17,10 +17,12 @@ jobs:
           [ "v$ver" = "$GITHUB_REF_NAME" ] || { echo "Tag $GITHUB_REF_NAME != plugin version v$ver"; exit 1; }
       - name: PHP lint
         run: find . -name '*.php' -not -path './vendor/*' -print0 | xargs -0 -n1 php -l
+      - name: Run tests
+        run: bash tests/run.sh
       - name: Build zip
         run: |
           mkdir -p build/framix-blocks
-          rsync -a --exclude='.git*' --exclude='.github' --exclude='build' ./ build/framix-blocks/
+          rsync -a --exclude='.git*' --exclude='.github' --exclude='build' --exclude='tests' ./ build/framix-blocks/
           cd build && zip -rq framix-blocks.zip framix-blocks
       - name: Create GitHub release
         env:

@@ -63,7 +63,9 @@ never on the front end, so the public render stays byte-identical. Only **text
 attributes** are editable inline: a plain `string` attribute gets a text input,
 a `string` attribute with `"control": "textarea"` gets a textarea, and string
 fields inside a repeater are reachable with `framix_block_edit_attr( $attr, $i,
-'field' )`. Media attributes and selects stay in the sidebar.
+'field' )` — the index is into the raw attribute array, so if your template
+sorts or slices the array, pass the original array index, not the loop counter.
+Media attributes and selects stay in the sidebar.
 
 ## The core / site split
 

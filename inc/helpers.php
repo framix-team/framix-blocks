@@ -68,16 +68,22 @@ if ( ! function_exists( 'framix_block_edit_attr' ) ) {
 	 *
 	 * Usage in render.php (inside the element's opening tag):
 	 *   <h3 class="card-title"<?php echo framix_block_edit_attr( 'title' ); ?>>
-	 * Repeater row field (index into the RAW attribute array):
+	 * Repeater row field (index into the RAW attribute array — if your
+	 * template sorts or slices the array, pass the original array index,
+	 * not the loop counter):
 	 *   <li<?php echo framix_block_edit_attr( 'items', $i, 'label' ); ?>>
 	 *
 	 * @param string      $attr  Attribute name from block.json.
 	 * @param int|null    $index Repeater row index (raw array index).
-	 * @param string|null $field Repeater field key.
+	 * @param string|null $field Repeater field key. Requires $index.
 	 * @return string Escaped attribute string (leading space) or ''.
 	 */
 	function framix_block_edit_attr( $attr, $index = null, $field = null ) {
 		if ( ! ( defined( 'REST_REQUEST' ) && REST_REQUEST ) ) {
+			return '';
+		}
+		// A field without a row index is not a supported combination.
+		if ( null !== $field && null === $index ) {
 			return '';
 		}
 		$out = ' data-framix-edit="' . esc_attr( $attr ) . '"';

@@ -82,9 +82,15 @@
 	var withInlineEdit = wp.compose.createHigherOrderComponent( function ( BlockEdit ) {
 		return function ( props ) {
 			var wrapRef = useRef( null );
-			var editingState = useState( null ); // { attr, i, f, anchor, spec }
+			// The anchor node lives in a ref, not state: SSR re-renders swap
+			// the node out from under us, and the MutationObserver must stay
+			// mounted across those swaps (see the re-anchor effect below).
+			var anchorRef = useRef( null );
+			var editingState = useState( null ); // { attr, i, f, spec }
 			var editing = editingState[ 0 ];
 			var setEditing = editingState[ 1 ];
+			var tickState = useState( 0 ); // render bump when the anchor ref moves
+			var setTick = tickState[ 1 ];
 
 			useEffect( function () {
 				var node = wrapRef.current;
@@ -106,11 +112,16 @@
 					}
 					e.preventDefault();
 					e.stopPropagation();
+					// The capture-phase swallow means the editor never sees the
+					// click — select the block ourselves so the toolbar appears.
+					if ( wp.data && props.clientId ) {
+						wp.data.dispatch( 'core/block-editor' ).selectBlock( props.clientId );
+					}
+					anchorRef.current = hit;
 					setEditing( {
 						attr: attr,
 						i: iRaw === null ? null : parseInt( iRaw, 10 ),
 						f: f,
-						anchor: hit,
 						spec: spec,
 					} );
 				}
@@ -121,6 +132,10 @@
 			}, [ props.name ] );
 
 			// SSR re-render replaces the preview DOM — re-anchor the open popover.
+			// Keyed on the stable target identity (not the editing object), so the
+			// observer survives re-anchors instead of tearing down on each swap;
+			// the anchor moves via the ref + a tick bump that re-renders the Popover.
+			var editingKey = editing ? editing.attr + '|' + editing.i + '|' + editing.f : null;
 			useEffect( function () {
 				if ( ! editing || ! wrapRef.current ) {
 					return undefined;
@@ -130,15 +145,18 @@
 						return;
 					}
 					var fresh = wrapRef.current.querySelector( targetSelector( editing ) );
-					if ( fresh && fresh !== editing.anchor ) {
-						setEditing( Object.assign( {}, editing, { anchor: fresh } ) );
+					if ( fresh && fresh !== anchorRef.current ) {
+						anchorRef.current = fresh;
+						setTick( function ( t ) {
+							return t + 1;
+						} );
 					}
 				} );
 				observer.observe( wrapRef.current, { childList: true, subtree: true } );
 				return function () {
 					observer.disconnect();
 				};
-			}, [ editing ] );
+			}, [ editingKey ] );
 
 			function currentValue() {
 				var v = props.attributes[ editing.attr ];
@@ -166,15 +184,16 @@
 			}
 
 			var popover = null;
-			if ( editing && editing.anchor ) {
+			if ( editing && anchorRef.current ) {
 				var Control = editing.spec.multiline ? TextareaControl : TextControl;
 				popover = el(
 					Popover,
 					{
-						anchor: editing.anchor,
+						anchor: anchorRef.current,
 						placement: 'bottom-start',
 						focusOnMount: true,
 						onClose: function () {
+							anchorRef.current = null;
 							setEditing( null );
 						},
 					},
@@ -194,7 +213,9 @@
 			return el(
 				Fragment,
 				null,
-				el( 'div', { ref: wrapRef }, el( BlockEdit, props ) ),
+				// display:contents keeps the wrapper layout-neutral — the HOC
+				// wraps every block, including flex/grid parents like columns.
+				el( 'div', { ref: wrapRef, style: { display: 'contents' } }, el( BlockEdit, props ) ),
 				popover
 			);
 		};

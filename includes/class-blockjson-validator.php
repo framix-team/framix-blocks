@@ -78,6 +78,60 @@ class Framix_Blocks_BlockJSON_Validator {
 	);
 
 	/**
+	 * Allowed keys inside an attribute's `media` object.
+	 *
+	 * @var string[]
+	 */
+	private static $allowed_media_keys = array(
+		'default_asset',
+		'alt',
+	);
+
+	/**
+	 * Sideloadable raster extensions allowed for a media `default_asset`
+	 * (lowercase). SVG is deliberately excluded — WordPress refuses SVG
+	 * uploads; decorative SVGs use framix_block_asset_url() instead.
+	 *
+	 * @var string[]
+	 */
+	private static $allowed_default_asset_ext = array(
+		'webp',
+		'png',
+		'jpg',
+		'jpeg',
+		'gif',
+		'avif',
+	);
+
+	/**
+	 * Extensions permitted for any file under a block's assets/ dir
+	 * (lowercase). Anything else — .php, .js, .html, dotfiles — is rejected.
+	 *
+	 * @var string[]
+	 */
+	private static $allowed_asset_ext = array(
+		'webp',
+		'png',
+		'jpg',
+		'jpeg',
+		'gif',
+		'svg',
+		'avif',
+		'woff',
+		'woff2',
+		'ttf',
+		'otf',
+		'json',
+	);
+
+	/**
+	 * Total size cap (bytes) for a block's assets/ dir. 20 MB.
+	 *
+	 * @var int
+	 */
+	const ASSETS_MAX_BYTES = 20971520;
+
+	/**
 	 * Validate a block's block.json.
 	 *
 	 * @param string $block_json_path Absolute path to block.json.
@@ -132,6 +186,14 @@ class Framix_Blocks_BlockJSON_Validator {
 						$errors[] = $msg;
 					}
 				}
+			}
+		}
+
+		// 3. Asset tree — when the block dir holds an assets/ subdir, vet it.
+		$assets_dir = dirname( $block_json_path ) . '/assets';
+		if ( is_dir( $assets_dir ) ) {
+			foreach ( self::validate_assets_dir( $assets_dir ) as $msg ) {
+				$errors[] = $msg;
 			}
 		}
 
@@ -203,6 +265,13 @@ class Framix_Blocks_BlockJSON_Validator {
 			}
 		}
 
+		// media — optional object, only with control: media; vetted below.
+		if ( isset( $attr_def['media'] ) ) {
+			foreach ( self::validate_media( $attr_name, $attr_def ) as $msg ) {
+				$errors[] = $msg;
+			}
+		}
+
 		// type: array is only meaningful to the repeater control.
 		if ( isset( $attr_def['type'] ) && 'array' === $attr_def['type'] && ( ! isset( $attr_def['control'] ) || 'repeater' !== $attr_def['control'] ) ) {
 			$errors[] = sprintf(
@@ -230,6 +299,147 @@ class Framix_Blocks_BlockJSON_Validator {
 					}
 				}
 			}
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Validate an attribute's `media` object (media-defaults schema).
+	 *
+	 * Only legal alongside control: media. Allows exactly default_asset + alt;
+	 * default_asset must be a safe relative path into the block's assets/ dir
+	 * with a sideloadable raster extension, and a media default_asset forbids
+	 * a hardcoded non-zero schema `default`. File existence is NOT checked
+	 * here — that is runtime engine behavior, not schema validation.
+	 *
+	 * @param string $attr_name Attribute key (for messages).
+	 * @param array  $attr_def  Full attribute definition (holds `media`).
+	 * @return array<int, string> Error messages (empty on success).
+	 */
+	private static function validate_media( $attr_name, $attr_def ) {
+		$errors = array();
+		$media  = $attr_def['media'];
+
+		// media only legal alongside control: media.
+		if ( ! isset( $attr_def['control'] ) || 'media' !== $attr_def['control'] ) {
+			$errors[] = sprintf(
+				'block.json attribute "%s" declares "media" — only supported with control: "media".',
+				$attr_name
+			);
+			return $errors;
+		}
+
+		if ( ! is_array( $media ) ) {
+			$errors[] = sprintf( 'block.json attribute "%s" "media" must be an object.', $attr_name );
+			return $errors;
+		}
+
+		// Allowed keys: exactly default_asset + alt.
+		foreach ( $media as $media_key => $unused ) {
+			if ( ! in_array( $media_key, self::$allowed_media_keys, true ) ) {
+				$errors[] = sprintf(
+					'block.json attribute "%1$s" "media" has unsupported key "%2$s"; allowed: %3$s.',
+					$attr_name,
+					is_scalar( $media_key ) ? (string) $media_key : gettype( $media_key ),
+					implode( ', ', self::$allowed_media_keys )
+				);
+			}
+		}
+
+		// alt — when present, a string.
+		if ( isset( $media['alt'] ) && ! is_string( $media['alt'] ) ) {
+			$errors[] = sprintf( 'block.json attribute "%s" "media.alt" must be a string.', $attr_name );
+		}
+
+		// default_asset — when present, a safe relative assets/ path.
+		if ( isset( $media['default_asset'] ) ) {
+			$path = $media['default_asset'];
+
+			if ( ! is_string( $path ) || '' === $path ) {
+				$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must be a non-empty string.', $attr_name );
+			} else {
+				if ( 0 !== strpos( $path, 'assets/' ) ) {
+					$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must be a relative path starting with "assets/".', $attr_name );
+				}
+				if ( false !== strpos( $path, '://' ) ) {
+					$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must not contain a URL scheme.', $attr_name );
+				}
+				if ( 0 === strpos( $path, '/' ) ) {
+					$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must not be an absolute path.', $attr_name );
+				}
+				if ( in_array( '..', explode( '/', $path ), true ) ) {
+					$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must not contain a ".." path segment.', $attr_name );
+				}
+				if ( false !== strpos( $path, "\0" ) ) {
+					$errors[] = sprintf( 'block.json attribute "%s" "media.default_asset" must not contain a NUL byte.', $attr_name );
+				}
+
+				$ext = strtolower( (string) pathinfo( $path, PATHINFO_EXTENSION ) );
+				if ( ! in_array( $ext, self::$allowed_default_asset_ext, true ) ) {
+					$errors[] = sprintf(
+						'block.json attribute "%1$s" "media.default_asset" extension "%2$s" is not allowed; allowed: %3$s.',
+						$attr_name,
+						$ext,
+						implode( ', ', self::$allowed_default_asset_ext )
+					);
+				}
+			}
+
+			// A media default_asset forbids a hardcoded non-zero schema default
+			// (the engine supplies the real attachment ID at runtime).
+			if ( isset( $attr_def['default'] ) && 0 !== $attr_def['default'] ) {
+				$errors[] = sprintf(
+					'block.json attribute "%s" carries "media.default_asset" — the schema "default" must be 0 or absent.',
+					$attr_name
+				);
+			}
+		}
+
+		return $errors;
+	}
+
+	/**
+	 * Validate a block's assets/ directory (extension allowlist + size cap).
+	 *
+	 * Recursive but cheap — block asset dirs are small, so no caching. Any
+	 * file whose extension is outside the allowlist (notably .php/.js/.html/
+	 * .htaccess/dotfiles) is an error, as is a total tree over the size cap.
+	 *
+	 * @param string $assets_dir Absolute path to the block's assets/ dir.
+	 * @return array<int, string> Error messages (empty on success).
+	 */
+	private static function validate_assets_dir( $assets_dir ) {
+		$errors = array();
+		$total  = 0;
+
+		$iterator = new RecursiveIteratorIterator(
+			new RecursiveDirectoryIterator( $assets_dir, FilesystemIterator::SKIP_DOTS ),
+			RecursiveIteratorIterator::LEAVES_ONLY
+		);
+
+		foreach ( $iterator as $file ) {
+			if ( ! $file->isFile() ) {
+				continue;
+			}
+
+			$ext = strtolower( $file->getExtension() );
+			if ( ! in_array( $ext, self::$allowed_asset_ext, true ) ) {
+				$errors[] = sprintf(
+					'block assets/ contains a disallowed file "%s" (extension not in the asset allowlist).',
+					$file->getFilename()
+				);
+			}
+
+			$total += (int) $file->getSize();
+		}
+
+		if ( $total > self::ASSETS_MAX_BYTES ) {
+			$errors[] = sprintf(
+				'block assets/ total size %1$d bytes exceeds the %2$d-byte cap.',
+				$total,
+				self::ASSETS_MAX_BYTES
+			);
 		}
 
 		return $errors;

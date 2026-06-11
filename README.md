@@ -36,11 +36,34 @@ block found, the loader:
    metadata and — via `supports.autoRegister` — generate the editor preview and
    Inspector.
 
-The only JavaScript the plugin ships is two generic editor shims: a
+The only JavaScript the plugin ships is three generic editor shims: a
 `MediaUpload` picker for attributes declaring `"control": "media"` (storing an
-attachment ID), and a sidebar CRUD interface for `"control": "repeater"` arrays.
-Neither renders the block body — the server-rendered output stays canonical in
-both the editor and on the front end.
+attachment ID), a sidebar CRUD interface for `"control": "repeater"` arrays, and
+the inline text-edit shim described below. None renders the block body — the
+server-rendered output stays canonical in both the editor and on the front end.
+
+### Inline text edit
+
+A render template can opt an element into click-to-edit by printing a marker in
+its opening tag with the `framix_block_edit_attr()` helper. In the editor canvas
+the marked text gains a hover affordance, and clicking it opens a small popover
+with the matching control — derived from the block.json attribute schema, with
+no per-block JavaScript.
+
+```php
+<h3 class="card-title"<?php echo framix_block_edit_attr( 'title' ); ?>>
+```
+
+```php
+<li<?php echo framix_block_edit_attr( 'items', $i, 'label' ); ?>>
+```
+
+The markers are **REST-gated** — emitted only during the editor's SSR preview,
+never on the front end, so the public render stays byte-identical. Only **text
+attributes** are editable inline: a plain `string` attribute gets a text input,
+a `string` attribute with `"control": "textarea"` gets a textarea, and string
+fields inside a repeater are reachable with `framix_block_edit_attr( $attr, $i,
+'field' )`. Media attributes and selects stay in the sidebar.
 
 ## The core / site split
 

@@ -66,6 +66,7 @@ class Framix_Blocks_Loader {
 		add_action( 'init', array( $this, 'load_blocks' ), 5 );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_media_control' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_repeater_control' ) );
+		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_inline_edit' ) );
 	}
 
 	/**
@@ -293,6 +294,25 @@ class Framix_Blocks_Loader {
 				'wp-compose',
 				'wp-data',
 			),
+			FRAMIX_BLOCKS_VERSION,
+			true
+		);
+	}
+
+	/**
+	 * Inline-edit shim — click-to-edit for text attributes on SSR previews.
+	 * Templates opt elements in via framix_block_edit_attr() markers.
+	 *
+	 * Unlike the media/repeater shims this is enqueued UNCONDITIONALLY on
+	 * every editor load (no loaded_blocks guard): the script is a no-op
+	 * without markers, and always-mounted keeps the editor behavior
+	 * independent of registration order/timing.
+	 */
+	public function enqueue_inline_edit() {
+		wp_enqueue_script(
+			'framix-blocks-inline-edit',
+			FRAMIX_BLOCKS_URL . 'assets/inline-edit.js',
+			array( 'wp-blocks', 'wp-block-editor', 'wp-element', 'wp-components', 'wp-hooks', 'wp-compose', 'wp-data' ),
 			FRAMIX_BLOCKS_VERSION,
 			true
 		);

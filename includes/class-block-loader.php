@@ -163,7 +163,17 @@ class Framix_Blocks_Loader {
 			return;
 		}
 
-		$type = register_block_type( $dir, array( 'render_callback' => $render_fn ) );
+		$args = array( 'render_callback' => $render_fn );
+
+		// Media-defaults engine: when an attribute carries media.default_asset,
+		// it returns the full attributes array with resolved defaults rewritten
+		// to attachment IDs, which overrides the on-disk attributes wholesale.
+		$attributes = Framix_Blocks_Media_Defaults::resolve( $dir, $meta );
+		if ( null !== $attributes ) {
+			$args['attributes'] = $attributes;
+		}
+
+		$type = register_block_type( $dir, $args );
 
 		if ( $type instanceof WP_Block_Type ) {
 			$this->loaded_blocks[] = $type->name;

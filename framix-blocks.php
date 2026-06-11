@@ -3,7 +3,7 @@
  * Plugin Name:       Framix Blocks
  * Plugin URI:        https://github.com/framix-team/framix-blocks
  * Description:       Generic host for server-rendered Gutenberg blocks. Block sources register their directories via the `framix_blocks_block_dirs` filter (each block: block.json + render.php under <dir>/<slug>/). The loader is fully config-driven — it derives the render-callback name from each block's block.json `name`. WordPress 7.0 autoRegister generates the editor preview + Inspector; the only JS shipped is two generic editor.BlockEdit shims — a MediaUpload picker for control:"media" attributes and a sidebar CRUD UI for control:"repeater" arrays.
- * Version:           1.1.0
+ * Version:           1.2.0
  * Requires at least: 7.0
  * Requires PHP:      8.1
  * Author:            Framix
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'FRAMIX_BLOCKS_VERSION', '1.1.0' );
+define( 'FRAMIX_BLOCKS_VERSION', '1.2.0' );
 define( 'FRAMIX_BLOCKS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FRAMIX_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
 

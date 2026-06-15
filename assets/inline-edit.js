@@ -2,11 +2,15 @@
  * framix-blocks inline edit — click marked text in the editor canvas to edit.
  *
  * Server templates print framix_block_edit_attr() markers (REST-gated, never
- * on the front end). A capture-phase click on a marked node opens a Popover
- * anchored there with the matching control, derived from the block.json
- * attribute schema — no per-block configuration. Writes go through
- * setAttributes; the SSR preview re-renders and a MutationObserver re-anchors
- * the open popover to the fresh node.
+ * on the front end). The editor renders dynamic/SSR block previews
+ * non-interactively, so a click lands on the block wrapper — an ANCESTOR of
+ * the marked element — not on the marker itself. We therefore resolve the
+ * marker by hit-testing the pointer coordinates against the marked descendants
+ * (a JS mousemove pass outlines them on hover for the same reason). The
+ * Popover then opens anchored on the resolved node with the control derived
+ * from the block.json attribute schema — no per-block configuration. Writes go
+ * through setAttributes; the SSR preview re-renders and a MutationObserver
+ * re-anchors the open popover to the fresh node.
  *
  * Plain IIFE, no build step — same conventions as media-control.js.
  */
@@ -29,9 +33,12 @@
 	var MARKER_I = 'data-framix-edit-i';
 	var MARKER_F = 'data-framix-edit-f';
 	var STYLE_ID = 'framix-inline-edit-style';
+	var HOVER_CLASS = 'framix-edit-hover';
+	// CSS :hover can't fire on the marker — the SSR preview is non-interactive,
+	// so the pointer never reaches it. A JS mousemove pass toggles HOVER_CLASS.
 	var HOVER_CSS =
 		'[' + MARKER + ']{cursor:text}' +
-		'[' + MARKER + ']:hover{outline:1px dashed currentColor;outline-offset:2px}';
+		'.' + HOVER_CLASS + '{outline:1px dashed currentColor;outline-offset:2px}';
 
 	// The hover affordance must land in the canvas document (iframed in 6.3+).
 	function ensureHoverStyle( doc ) {
@@ -79,6 +86,33 @@
 		return sel;
 	}
 
+	// Resolve the marked element under a viewport point by hit-testing the
+	// marked descendants directly. The editor's non-interactive SSR preview
+	// makes the block wrapper the pointer target, so e.target.closest() (which
+	// only searches ancestors) can't reach the marker; coordinate testing can.
+	// On overlapping rects the smallest wins, so a nested marker (a repeater
+	// row inside a card) beats its container. Coordinates and rects are both
+	// relative to the canvas iframe's viewport, so they compare directly.
+	function markerAt( node, x, y ) {
+		var els = node.querySelectorAll( '[' + MARKER + ']' );
+		var best = null;
+		var bestArea = Infinity;
+		for ( var i = 0; i < els.length; i++ ) {
+			var r = els[ i ].getBoundingClientRect();
+			if ( r.width <= 0 || r.height <= 0 ) {
+				continue;
+			}
+			if ( x >= r.left && x <= r.right && y >= r.top && y <= r.bottom ) {
+				var area = r.width * r.height;
+				if ( area < bestArea ) {
+					best = els[ i ];
+					bestArea = area;
+				}
+			}
+		}
+		return best;
+	}
+
 	var withInlineEdit = wp.compose.createHigherOrderComponent( function ( BlockEdit ) {
 		return function ( props ) {
 			var wrapRef = useRef( null );
@@ -98,8 +132,16 @@
 					return undefined;
 				}
 				ensureHoverStyle( node.ownerDocument );
+
 				function onClick( e ) {
+					// Interactive blocks: the marker is (in) the click target.
+					// SSR/dynamic previews are non-interactive, so the target is
+					// the block wrapper — an ancestor of the marker — and
+					// closest() misses; fall back to coordinate hit-testing.
 					var hit = e.target && e.target.closest ? e.target.closest( '[' + MARKER + ']' ) : null;
+					if ( ! hit || ! node.contains( hit ) ) {
+						hit = markerAt( node, e.clientX, e.clientY );
+					}
 					if ( ! hit || ! node.contains( hit ) ) {
 						return;
 					}
@@ -125,9 +167,38 @@
 						spec: spec,
 					} );
 				}
+
+				// Hover affordance: outline the marker under the pointer. Driven
+				// by mousemove (not CSS :hover) for the same non-interactivity
+				// reason the click handler hit-tests by coordinate.
+				var hovered = null;
+				function setHover( m ) {
+					if ( m === hovered ) {
+						return;
+					}
+					if ( hovered ) {
+						hovered.classList.remove( HOVER_CLASS );
+					}
+					hovered = m;
+					if ( m ) {
+						m.classList.add( HOVER_CLASS );
+					}
+				}
+				function onMove( e ) {
+					setHover( markerAt( node, e.clientX, e.clientY ) );
+				}
+				function onLeave() {
+					setHover( null );
+				}
+
 				node.addEventListener( 'click', onClick, true );
+				node.addEventListener( 'mousemove', onMove );
+				node.addEventListener( 'mouseleave', onLeave );
 				return function () {
 					node.removeEventListener( 'click', onClick, true );
+					node.removeEventListener( 'mousemove', onMove );
+					node.removeEventListener( 'mouseleave', onLeave );
+					setHover( null );
 				};
 			}, [ props.name ] );
 

@@ -48,6 +48,33 @@ class Framix_Blocks_Loader {
 	private $loaded_blocks = array();
 
 	/**
+	 * Absolute block.json `file` paths this loader owns, keyed by realpath.
+	 *
+	 * Populated in load_block() BEFORE register_block_type() so the
+	 * block_type_metadata filter can gate the standard-supports injection to
+	 * framix-owned blocks only (third-party blocks pass through untouched).
+	 *
+	 * @var array<string,true>
+	 */
+	private $owned_block_files = array();
+
+	/**
+	 * Block names this loader owns (namespace/slug), keyed by name.
+	 *
+	 * Used by the WPML aggregator (auto-translatable config) and tests.
+	 *
+	 * @var array<string,true>
+	 */
+	private $owned_block_names = array();
+
+	/**
+	 * Per-block translatable descriptors collected at load time for auto-WPML.
+	 *
+	 * @var array<int,array>
+	 */
+	private $wpml_descriptors = array();
+
+	/**
 	 * Get the singleton instance.
 	 *
 	 * @return Framix_Blocks_Loader
@@ -64,6 +91,7 @@ class Framix_Blocks_Loader {
 	 */
 	private function __construct() {
 		add_action( 'init', array( $this, 'load_blocks' ), 5 );
+		add_filter( 'block_type_metadata', array( $this, 'inject_standard_supports' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_media_control' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_repeater_control' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_inline_edit' ) );
@@ -174,6 +202,23 @@ class Framix_Blocks_Loader {
 			$args['attributes'] = $attributes;
 		}
 
+		// Record ownership BEFORE registration so the block_type_metadata
+		// filter (which fires during register_block_type()'s on-disk read) can
+		// gate the standard-supports injection to framix-owned blocks only.
+		$owned_key = realpath( $block_json );
+		if ( false !== $owned_key ) {
+			$this->owned_block_files[ $owned_key ] = true;
+		}
+		if ( '' !== $name ) {
+			$this->owned_block_names[ $name ] = true;
+		}
+
+		// Collect this block's translatable descriptor for auto-WPML.
+		if ( '' !== $name && isset( $meta['attributes'] ) && is_array( $meta['attributes'] )
+			&& class_exists( 'Framix_Blocks_WPML_Config' ) ) {
+			$this->wpml_descriptors[] = Framix_Blocks_WPML_Config::extract( $name, $meta['attributes'] );
+		}
+
 		$type = register_block_type( $dir, $args );
 
 		if ( $type instanceof WP_Block_Type ) {
@@ -184,6 +229,59 @@ class Framix_Blocks_Loader {
 				Framix_Blocks_Category::instance()->register_slug( (string) $meta['category'] );
 			}
 		}
+	}
+
+	/**
+	 * Block names framix-blocks registered this request.
+	 *
+	 * @return string[]
+	 */
+	public function registered_block_names() {
+		return array_keys( $this->owned_block_names );
+	}
+
+	/**
+	 * Aggregated translatable descriptors for owned blocks (non-empty only).
+	 *
+	 * @return array<int,array>
+	 */
+	public function wpml_descriptors() {
+		if ( ! class_exists( 'Framix_Blocks_WPML_Config' ) ) {
+			return array();
+		}
+		return Framix_Blocks_WPML_Config::aggregate( $this->wpml_descriptors );
+	}
+
+	/**
+	 * Inject the standard supports into framix-owned block metadata.
+	 *
+	 * Fires via the core `block_type_metadata` filter during
+	 * register_block_type()'s on-disk metadata read. Gated to blocks this
+	 * loader owns (matched by the metadata `file` path it recorded in
+	 * load_block()), so third-party blocks (Kadence, core) pass through
+	 * untouched. The merge is block-wins: a block's own `supports` override
+	 * the standard defaults per top-level key.
+	 *
+	 * @param array $metadata Decoded block.json metadata.
+	 * @return array Metadata, with merged `supports` for owned blocks.
+	 */
+	public function inject_standard_supports( $metadata ) {
+		if ( ! is_array( $metadata ) ) {
+			return $metadata;
+		}
+
+		// Gate by the metadata `file` path WP sets to the block.json being read.
+		$file = isset( $metadata['file'] ) ? realpath( (string) $metadata['file'] ) : false;
+		if ( false === $file || ! isset( $this->owned_block_files[ $file ] ) ) {
+			return $metadata;
+		}
+
+		$block_supports       = isset( $metadata['supports'] ) && is_array( $metadata['supports'] )
+			? $metadata['supports']
+			: array();
+		$metadata['supports'] = Framix_Blocks_Block_Supports::merge( $block_supports );
+
+		return $metadata;
 	}
 
 	/**

@@ -301,6 +301,21 @@ class Framix_Blocks_BlockJSON_Validator {
 			}
 		}
 
+		// translatable — optional auto-WPML flag (Framix_Blocks_WPML_Config).
+		// Either boolean true (a string attr) or an object { "fields": [ ... ] }
+		// (an array-of-objects attr). Anything else misuses the convention.
+		if ( isset( $attr_def['translatable'] ) ) {
+			$t  = $attr_def['translatable'];
+			$ok = ( true === $t )
+				|| ( is_array( $t ) && isset( $t['fields'] ) && is_array( $t['fields'] ) && ! empty( $t['fields'] ) );
+			if ( ! $ok ) {
+				$errors[] = sprintf(
+					'block.json attribute "%s" "translatable" must be true or an object with a non-empty "fields" array.',
+					$attr_name
+				);
+			}
+		}
+
 		return $errors;
 	}
 

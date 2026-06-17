@@ -28,6 +28,7 @@ define( 'FRAMIX_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
 require_once FRAMIX_BLOCKS_DIR . 'inc/helpers.php';
 require_once FRAMIX_BLOCKS_DIR . 'includes/class-blockjson-validator.php';
 require_once FRAMIX_BLOCKS_DIR . 'includes/class-block-supports.php';
+require_once FRAMIX_BLOCKS_DIR . 'includes/class-wpml-config.php';
 require_once FRAMIX_BLOCKS_DIR . 'includes/class-media-defaults.php';
 require_once FRAMIX_BLOCKS_DIR . 'includes/class-block-category.php';
 require_once FRAMIX_BLOCKS_DIR . 'includes/class-block-loader.php';

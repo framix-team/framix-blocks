@@ -3,7 +3,7 @@
  * Plugin Name:       Framix Blocks
  * Plugin URI:        https://github.com/framix-team/framix-blocks
  * Description:       Powers your site's custom-designed content blocks — fast-loading sections your team edits visually right inside WordPress. Built and kept up to date automatically by Framix.
- * Version:           1.2.1
+ * Version:           1.3.0
  * Requires at least: 7.0
  * Requires PHP:      8.1
  * Author:            Framix
@@ -21,7 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'FRAMIX_BLOCKS_VERSION', '1.2.1' );
+define( 'FRAMIX_BLOCKS_VERSION', '1.3.0' );
 define( 'FRAMIX_BLOCKS_DIR', plugin_dir_path( __FILE__ ) );
 define( 'FRAMIX_BLOCKS_URL', plugin_dir_url( __FILE__ ) );
 

@@ -92,6 +92,7 @@ class Framix_Blocks_Loader {
 	private function __construct() {
 		add_action( 'init', array( $this, 'load_blocks' ), 5 );
 		add_filter( 'block_type_metadata', array( $this, 'inject_standard_supports' ) );
+		add_filter( 'wpml_config_array', array( $this, 'filter_wpml_config' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_media_control' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_repeater_control' ) );
 		add_action( 'enqueue_block_editor_assets', array( $this, 'enqueue_inline_edit' ) );
@@ -250,6 +251,53 @@ class Framix_Blocks_Loader {
 			return array();
 		}
 		return Framix_Blocks_WPML_Config::aggregate( $this->wpml_descriptors );
+	}
+
+	/**
+	 * Contribute framix blocks' translatable config to WPML at runtime.
+	 *
+	 * Hooked on WPML's `wpml_config_array` filter (fired by
+	 * WPML_Config::load_config_run() on admin config-rebuild pages, after
+	 * init:5 — so our descriptors are ready). We render our descriptors to a
+	 * wpml-config.xml string and parse it back with WPML's OWN WPML_XML2Array
+	 * transform, guaranteeing the exact `gutenberg-block` array shape WPML's
+	 * Gutenberg integration consumes. No file on disk; works platform-wide for
+	 * every block the loader registered (incl. the per-site companion plugin).
+	 *
+	 * @param array $config WPML's aggregated parsed-config array.
+	 * @return array
+	 */
+	public function filter_wpml_config( $config ) {
+		$descriptors = $this->wpml_descriptors();
+		if ( empty( $descriptors ) || ! class_exists( 'WPML_XML2Array' ) || ! class_exists( 'Framix_Blocks_WPML_Config' ) ) {
+			return $config;
+		}
+
+		$xml    = Framix_Blocks_WPML_Config::to_xml( $descriptors );
+		$parsed = ( new WPML_XML2Array() )->get( $xml, true );
+		$mine   = isset( $parsed['wpml-config']['gutenberg-blocks']['gutenberg-block'] )
+			? $parsed['wpml-config']['gutenberg-blocks']['gutenberg-block']
+			: array();
+		if ( empty( $mine ) ) {
+			return $config;
+		}
+		// XML2Array returns a single assoc array for exactly one block; normalize to a list.
+		if ( isset( $mine['attr'] ) ) {
+			$mine = array( $mine );
+		}
+
+		if ( ! is_array( $config ) ) {
+			$config = array();
+		}
+		$existing = isset( $config['wpml-config']['gutenberg-blocks']['gutenberg-block'] )
+			? $config['wpml-config']['gutenberg-blocks']['gutenberg-block']
+			: array();
+		if ( isset( $existing['attr'] ) ) {
+			$existing = array( $existing );
+		}
+		$config['wpml-config']['gutenberg-blocks']['gutenberg-block'] = array_merge( (array) $existing, $mine );
+
+		return $config;
 	}
 
 	/**
